@@ -1,0 +1,85 @@
+# ===========================
+# Swift Package Manager
+# ===========================
+.build/
+.swiftpm/
+*.o
+*.d
+
+# Package.resolved is typically committed for apps but excluded for libraries
+# so downstream users resolve their own versions. Uncomment to commit it:
+# !Package.resolved
+Package.resolved
+
+# ===========================
+# Xcode
+# ===========================
+*.xcodeproj/
+*.xcworkspace/
+!*.xcworkspace/contents.xcworkspacedata
+
+# User-specific Xcode settings
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# Derived data & archives
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Playground output
+timeline.xctimeline
+playground.xcworkspace
+
+# ===========================
+# macOS
+# ===========================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Spotlight index
+.Spotlight-V100
+
+# Trashes
+.Trashes
+.fseventsd
+.TemporaryItems
+.VolumeIcon.icns
+
+# ===========================
+# Editor / IDE
+# ===========================
+# VS Code
+.vscode/
+
+# JetBrains
+.idea/
+*.iml
+
+# Vim/Emacs swap files
+*.swp
+*.swo
+*~
+\#*\#
+
+# ===========================
+# Testing
+# ===========================
+# XCTest result bundles
+*.xcresult/
+
+# ===========================
+# Miscellaneous
+# ===========================
+# Compiled C/C++ objects (cppjieba headers only, no separate .o needed)
+*.a
+*.la
+*.lo
+
+# Environment files
+.env
+.env.local
