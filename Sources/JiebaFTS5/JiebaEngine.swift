@@ -45,8 +45,8 @@ final class JiebaEngine: @unchecked Sendable {
 
         guard
             let dictPath = Bundle.module.path(forResource: "jieba.dict", ofType: "utf8"),
-            let hmmPath  = Bundle.module.path(forResource: "hmm_model",  ofType: "utf8"),
-            let userPath = Bundle.module.path(forResource: "user.dict",  ofType: "utf8")
+            let hmmPath  = Bundle.module.path(forResource: "hmm_model", ofType: "utf8"),
+            let userPath = Bundle.module.path(forResource: "user.dict", ofType: "utf8")
         else {
             // Missing bundled dictionaries is a programming error (bad SPM
             // resources configuration).  Crash early so it is caught during
@@ -75,8 +75,8 @@ final class JiebaEngine: @unchecked Sendable {
         // "jieba_create returned NULL".
         let fm = FileManager.default
         var missing: [String] = []
-        if !fm.fileExists(atPath: dictPath)     { missing.append("  • dict: \(dictPath)") }
-        if !fm.fileExists(atPath: hmmPath)      { missing.append("  • hmm:  \(hmmPath)") }
+        if !fm.fileExists(atPath: dictPath) { missing.append("  • dict: \(dictPath)") }
+        if !fm.fileExists(atPath: hmmPath) { missing.append("  • hmm:  \(hmmPath)") }
         if !fm.fileExists(atPath: userDictPath) { missing.append("  • user: \(userDictPath)") }
 
         if !missing.isEmpty {

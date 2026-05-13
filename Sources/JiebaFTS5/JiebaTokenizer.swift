@@ -191,14 +191,13 @@ public final class JiebaTokenizer: FTS5CustomTokenizer {
             let isColocated = token.offset == prevOffset
             let flags: CInt = isColocated ? FTS5_TOKEN_COLOCATED : 0
 
-            let rc = emitToken(
+            let emission = TokenEmissionContext(
                 token: token,
                 byteStart: byteStart,
                 byteEnd: byteEnd,
                 flags: flags,
-                pTextBase: pTextBase,
-                callback: callback,
-                context: context)
+                pTextBase: pTextBase)
+            let rc = emitToken(ctx: emission, callback: callback, context: context)
             guard rc == SQLITE_OK else { return rc }
 
             if !isColocated { prevOffset = token.offset }
@@ -228,20 +227,29 @@ public final class JiebaTokenizer: FTS5CustomTokenizer {
             let byteStart = Int(token.offset)
             let byteEnd   = byteStart + Int(token.length)
 
-            let rc = emitToken(
+            let emission = TokenEmissionContext(
                 token: token,
                 byteStart: byteStart,
                 byteEnd: byteEnd,
                 flags: 0,            // always a new position; no synonyms in query mode
-                pTextBase: pTextBase,
-                callback: callback,
-                context: context)
+                pTextBase: pTextBase)
+            let rc = emitToken(ctx: emission, callback: callback, context: context)
             guard rc == SQLITE_OK else { return rc }
         }
         return SQLITE_OK
     }
 
     // MARK: Token emission
+
+    /// Bundles the per-token parameters that do not change between the
+    /// zero-copy and case-folding emission paths.
+    private struct TokenEmissionContext {
+        let token: JiebaToken
+        let byteStart: Int
+        let byteEnd: Int
+        let flags: CInt
+        let pTextBase: UnsafePointer<CChar>
+    }
 
     /// Emits a single token to the FTS5 callback.
     ///
@@ -260,14 +268,15 @@ public final class JiebaTokenizer: FTS5CustomTokenizer {
     ///   one heap allocation per token (unavoidable for correct Unicode folding).
     @inline(__always)
     private func emitToken(
-        token: JiebaToken,
-        byteStart: Int,
-        byteEnd: Int,
-        flags: CInt,
-        pTextBase: UnsafePointer<CChar>,
+        ctx: TokenEmissionContext,
         callback: @escaping FTS5TokenCallback,
         context: UnsafeMutableRawPointer?
     ) -> CInt {
+        let token     = ctx.token
+        let byteStart = ctx.byteStart
+        let byteEnd   = ctx.byteEnd
+        let flags     = ctx.flags
+        let pTextBase = ctx.pTextBase
         let wordLen = Int(token.length)
 
         // Zero-copy fast-exit: caseFolding disabled → use pTextBase slice.
