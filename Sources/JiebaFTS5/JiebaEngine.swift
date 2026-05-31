@@ -1,78 +1,98 @@
 // JiebaEngine.swift
 // JiebaFTS5
 //
-// Global singleton that owns the cppjieba segmentation engine.
-//
-// ## Architecture: two-layer separation
-//
-// GRDB creates one FTS5CustomTokenizer per database connection.  A DatabasePool
-// with the default 5 readers + 1 writer would create 6 tokenizer instances.
-// Each cppjieba instance builds its own Trie tree (~20-30 MB) on top of
-// the shared dictionary data.  On iOS, 6 × 25 MB ≈ 150 MB is unacceptable.
-//
-// The solution: one global JiebaEngine (heavyweight) shared by all lightweight
-// JiebaTokenizer instances (one per connection).
-//
-// ## Thread safety
-//
-// `static let` is initialised exactly once across all threads, equivalent to
-// a dispatch_once.  After initialisation, JiebaEngine calls only jieba_cut /
-// jieba_cut_for_search, which map to cppjieba `const` methods that perform no
-// writes.  Concurrent reads are therefore safe without any additional locking.
-//
-// `@unchecked Sendable` is justified:
-//   - `handle` is written once in `init()`, before any concurrent access.
-//   - All post-init C calls are read-only (const cppjieba segmenters).
+// Global shared engine managing the cppjieba lifecycle.
+// Supports dynamic configuration, explicit shutdown, and thread-safe dynamic inserts.
 
 import CJiebaWrapper
 import Foundation
 
 // MARK: - JiebaEngine
 
-/// Wraps the cppjieba segmentation engine as a process-lifetime global singleton.
-final class JiebaEngine: @unchecked Sendable {
+/// Wraps the cppjieba segmentation engine as a process-lifetime global singleton
+/// with configurable lifecycle and runtime dictionary mutation.
+public final class JiebaEngine: @unchecked Sendable {
 
-    // MARK: Singleton
+    // MARK: Config State
 
-    /// The shared engine, lazily initialised on first access.
-    ///
-    /// `static let` guarantees thread-safe, once-only initialisation with no
-    /// manual locking.  The closure executes the first time any code accesses
-    /// `JiebaEngine.shared` — typically during the first FTS5 tokenizer
-    /// instantiation inside `Configuration.prepareDatabase`.
-    static let shared: JiebaEngine = {
-        let fm = FileManager.default
+    private static var customConfig: (dictPath: String, hmmPath: String, userDictPath: String)?
+    private static let lock = NSLock()
+    private static var _shared: JiebaEngine?
 
-        guard
-            let dictPath = Bundle.module.path(forResource: "jieba.dict", ofType: "utf8"),
-            let hmmPath  = Bundle.module.path(forResource: "hmm_model", ofType: "utf8"),
-            let userPath = Bundle.module.path(forResource: "user.dict", ofType: "utf8")
-        else {
-            // Missing bundled dictionaries is a programming error (bad SPM
-            // resources configuration).  Crash early so it is caught during
-            // development rather than silently producing empty search results.
-            fatalError(
-                "[JiebaFTS5] Dictionary files not found in module Bundle.\n" +
-                "Ensure jieba.dict.utf8, hmm_model.utf8, and user.dict.utf8\n" +
-                "are listed under `resources:` in Package.swift and that\n" +
-                "`swift build` has been run to regenerate the bundle.\n" +
-                "Bundle path: \(Bundle.module.bundlePath)"
-            )
+    // MARK: Singleton Access
+
+    /// The shared engine instance.
+    /// Accessing this triggers initialization with either custom paths (if configured)
+    /// or fallback bundle paths.
+    public static var shared: JiebaEngine {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let instance = _shared {
+            return instance
         }
-        return JiebaEngine(dictPath: dictPath, hmmPath: hmmPath, userDictPath: userPath)
-    }()
 
-    // MARK: State
+        let paths: (dictPath: String, hmmPath: String, userDictPath: String)
+        if let custom = customConfig {
+            paths = custom
+        } else {
+            // Default to Bundle resources
+            guard
+                let dict = Bundle.module.path(forResource: "jieba.dict", ofType: "utf8"),
+                let hmm  = Bundle.module.path(forResource: "hmm_model", ofType: "utf8"),
+                let user = Bundle.module.path(forResource: "user.dict", ofType: "utf8")
+            else {
+                fatalError(
+                    "[JiebaFTS5] Default dictionary files not found in Bundle.module.\n" +
+                    "If you are running in a custom environment, call JiebaEngine.configure(...) " +
+                    "before accessing the database."
+                )
+            }
+            paths = (dict, hmm, user)
+        }
 
-    /// Opaque C handle to the underlying JiebaSegmenter (MixSegment + QuerySegment).
-    let handle: JiebaHandle
+        let instance = JiebaEngine(dictPath: paths.dictPath, hmmPath: paths.hmmPath, userDictPath: paths.userDictPath)
+        _shared = instance
+        return instance
+    }
 
-    // MARK: Init / deinit
+    // MARK: Config / Lifecycle APIs
+
+    /// Configures the engine paths. Must be called BEFORE the database is initialized
+    /// or the shared engine is accessed.
+    ///
+    /// - Parameters:
+    ///   - dictPath: Absolute path to the main dict.
+    ///   - hmmPath: Absolute path to the HMM model.
+    ///   - userDictPath: Absolute path to the user dictionary.
+    public static func configure(dictPath: String, hmmPath: String, userDictPath: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        guard _shared == nil else {
+            NSLog("[JiebaFTS5] Warning: JiebaEngine has already been initialized. Configuration ignored.")
+            return
+        }
+        customConfig = (dictPath, hmmPath, userDictPath)
+    }
+
+    /// Shuts down the current engine and releases its ~25 MB memory.
+    /// Useful for iOS memory warnings, background suspension, or clean test teardown.
+    /// Subsequent calls to `JiebaEngine.shared` will automatically reinitialize the engine.
+    public static func shutdown() {
+        lock.lock()
+        defer { lock.unlock() }
+        _shared = nil // Triggers deinit & C free
+    }
+
+    // MARK: Instance State
+
+    /// Opaque C handle to the underlying segmenter.
+    private let handle: JiebaHandle
+
+    // MARK: Init / Deinit
 
     private init(dictPath: String, hmmPath: String, userDictPath: String) {
-        // Pre-flight check: emit a targeted diagnostic before calling into C++,
-        // so the crash message names the exact missing file rather than just
-        // "jieba_create returned NULL".
         let fm = FileManager.default
         var missing: [String] = []
         if !fm.fileExists(atPath: dictPath) { missing.append("  • dict: \(dictPath)") }
@@ -81,71 +101,54 @@ final class JiebaEngine: @unchecked Sendable {
 
         if !missing.isEmpty {
             fatalError(
-                "[JiebaFTS5] Dictionary file(s) exist in Bundle.module paths but " +
-                "are not readable by FileManager:\n" +
-                missing.joined(separator: "\n") + "\n" +
-                "Check file permissions and that the SPM build succeeded."
+                "[JiebaFTS5] Dictionary file(s) not readable at specified paths:\n" +
+                missing.joined(separator: "\n")
             )
         }
 
         guard let h = jieba_create(dictPath, hmmPath, userDictPath) else {
             fatalError(
-                "[JiebaFTS5] jieba_create() returned NULL.\n" +
-                "Files were found but the C++ engine rejected them.\n" +
+                "[JiebaFTS5] jieba_create() returned NULL. Verify file format:\n" +
                 "  dict: \(dictPath)\n" +
                 "  hmm:  \(hmmPath)\n" +
-                "  user: \(userDictPath)\n" +
-                "Verify that the files are valid, uncorrupted jieba dictionaries."
+                "  user: \(userDictPath)"
             )
         }
         handle = h
     }
 
     deinit {
-        // Reached only in test teardown; the singleton lives for the process lifetime.
         jieba_free(handle)
     }
 
-    // MARK: Segmentation
+    // MARK: - Segmentation Wrappers
 
-    /// Precise segmentation (MixSeg: MP + HMM). Used for **query** tokenization.
-    ///
-    /// - Important: Use `text.utf8.count` — not `strlen` — to pass the byte
-    ///   length.  Swift `String` may contain embedded NUL characters (`U+0000`);
-    ///   `strlen` would silently truncate the input at the first NUL.
-    func cut(_ text: String) -> JiebaTokenList {
-        let byteCount = text.utf8.count   // O(1) for native UTF-8 storage (Swift 5.7+)
-        return text.withCString { ptr in
-            jieba_cut(handle, ptr, byteCount)
+    /// Precise segmentation (MixSeg: MP + HMM) with zero-allocation callback pass-through.
+    func cut(_ pText: UnsafePointer<CChar>, count: Int, context: UnsafeMutableRawPointer, callback: JiebaTokenEmitCallback) -> Int32 {
+        return jieba_cut(handle, pText, count, context, callback)
+    }
+
+    /// Search-engine segmentation (QuerySeg) with zero-allocation callback pass-through.
+    func cutForSearch(_ pText: UnsafePointer<CChar>, count: Int, context: UnsafeMutableRawPointer, callback: JiebaTokenEmitCallback) -> Int32 {
+        return jieba_cut_for_search(handle, pText, count, context, callback)
+    }
+
+    // MARK: Dynamic Dictionary
+
+    /// Dynamically inserts a word into the dictionary at runtime.
+    /// Thread-safe via internal C++ read-write locks.
+    public func insertUserWord(_ word: String) {
+        word.withCString { ptr in
+            jieba_insert_user_word(handle, ptr)
         }
     }
 
-    /// Search-engine segmentation (QuerySeg: MixSeg + shorter sub-words).
-    /// Used for **document** tokenization to maximise recall.
-    func cutForSearch(_ text: String) -> JiebaTokenList {
-        let byteCount = text.utf8.count
-        return text.withCString { ptr in
-            jieba_cut_for_search(handle, ptr, byteCount)
-        }
-    }
-
-    // MARK: Warm-up
+    // MARK: Preheat
 
     /// Pre-warms the shared engine on a background thread.
-    ///
-    /// The first access to `JiebaEngine.shared` loads ~5 MB of dictionary data
-    /// and constructs a Trie (~25 MB), taking 100–300 ms.  Call this at app
-    /// launch to ensure the first user search does not incur that latency.
-    ///
-    /// ```swift
-    /// func applicationDidFinishLaunching(_ application: UIApplication) -> Bool {
-    ///     JiebaEngine.preheat()
-    ///     return true
-    /// }
-    /// ```
-    static func preheat() {
-        // Task.detached avoids inheriting the caller's actor context, ensuring
-        // the dictionary load runs on the cooperative thread pool, not the main actor.
-        Task.detached(priority: .utility) { _ = JiebaEngine.shared }
+    public static func preheat() {
+        Task.detached(priority: .utility) {
+            _ = JiebaEngine.shared
+        }
     }
 }

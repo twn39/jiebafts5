@@ -1,9 +1,5 @@
 // JiebaIntegration.swift
 // JiebaFTS5
-//
-// Convenience GRDB integration APIs, mirroring the style of cjkfts5's
-// CJKIntegration.swift so adopters can migrate between the two tokenizers
-// with minimal code changes.
 
 import GRDB
 
@@ -24,15 +20,25 @@ extension FTS5TokenizerDescriptor {
     /// }
     /// ```
     ///
-    /// - Parameter caseFolding: When `true` (default), ASCII / Latin tokens are
-    ///   lowercased before indexing, enabling case-insensitive search.
-    ///   Set to `false` for case-sensitive behaviour.
+    /// - Parameters:
+    ///   - caseFolding: When `true` (default), ASCII / Latin tokens are lowercased.
+    ///   - widthFolding: When `true` (default), full-width digits/letters are mapped to half-width.
+    ///   - diacriticFolding: When `true` (default), Latin diacritics are folded (café -> cafe).
+    ///   - stopwords: Optional custom stopwords list.
     /// - Returns: A descriptor suitable for `FTS5TableDefinition.tokenizer`.
     public static func jieba(
-        caseFolding: Bool = true
+        caseFolding: Bool = true,
+        widthFolding: Bool = true,
+        diacriticFolding: Bool = true,
+        stopwords: Set<String>? = nil
     ) -> FTS5TokenizerDescriptor {
         JiebaTokenizer.tokenizerDescriptor(
-            options: JiebaTokenizerOptions(caseFolding: caseFolding)
+            options: JiebaTokenizerOptions(
+                caseFolding: caseFolding,
+                widthFolding: widthFolding,
+                diacriticFolding: diacriticFolding,
+                stopwords: stopwords
+            )
         )
     }
 }
@@ -43,20 +49,6 @@ extension Configuration {
 
     /// Registers `JiebaTokenizer` with every database connection opened by
     /// this configuration.
-    ///
-    /// **Typical usage:**
-    /// ```swift
-    /// var config = Configuration()
-    /// config.addJiebaTokenizer()
-    /// let dbPool = try DatabasePool(path: path, configuration: config)
-    /// ```
-    ///
-    /// Internally appends a `prepareDatabase` closure; calling this method
-    /// multiple times is safe but unnecessary.
-    ///
-    /// - Note: Works identically for both `DatabaseQueue` and `DatabasePool`.
-    ///   For a pool, GRDB executes `prepareDatabase` on every reader and writer
-    ///   connection, ensuring all connections recognise the tokenizer.
     public mutating func addJiebaTokenizer() {
         prepareDatabase { db in
             db.add(tokenizer: JiebaTokenizer.self)

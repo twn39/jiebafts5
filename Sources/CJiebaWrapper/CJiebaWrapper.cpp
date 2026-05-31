@@ -1,29 +1,25 @@
 // CJiebaWrapper.cpp
-// C++ implementation of the pure C interface declared in CJiebaWrapper.h.
-//
-// We use cppjieba's lower-level MixSegment and QuerySegment directly instead
-// of the top-level Jieba class.  Jieba's constructor unconditionally loads
-// KeywordExtractor (idf.utf8 + stop_words.utf8), which are not needed for FTS5
-// tokenization and would require two more bundled files.
+// C++ implementation of the callback-based C interface.
 
 #include "CJiebaWrapper.h"
 
 #include "cppjieba/MixSegment.hpp"
 #include "cppjieba/QuerySegment.hpp"
 
-#include <cstdlib>   // malloc, free
-#include <cstring>   // strdup
-#include <new>       // std::nothrow
+#include <algorithm>
+#include <shared_mutex>
 #include <vector>
+#include <string>
+#include <new>
 
-// MARK: - Internal engine struct
+// MARK: - Internal segmenter
 
-/// Groups the cppjieba objects needed for Cut and CutForSearch.
 struct JiebaSegmenter {
     cppjieba::DictTrie  dict_trie;
     cppjieba::HMMModel  model;
-    cppjieba::MixSegment   mix_seg;    // for Cut (MixSeg = MP + HMM)
-    cppjieba::QuerySegment query_seg;  // for CutForSearch (MixSeg + sub-words)
+    cppjieba::MixSegment   mix_seg;
+    cppjieba::QuerySegment query_seg;
+    std::shared_mutex      rw_mutex; // Read-write lock to protect concurrent dictionary modifications
 
     JiebaSegmenter(const std::string& dict_path,
                    const std::string& hmm_path,
@@ -35,32 +31,42 @@ struct JiebaSegmenter {
     {}
 };
 
-// MARK: - Internal helpers
+// MARK: - Helper
 
-static JiebaTokenList build_token_list(const std::vector<cppjieba::Word>& words) {
-    JiebaTokenList result;
-    result.count = words.size();
-
-    if (result.count == 0) {
-        result.tokens = nullptr;
-        return result;
+static int process_and_emit(std::vector<cppjieba::Word>& words, void* ctx, JiebaTokenEmitCallback callback) {
+    if (words.empty()) {
+        return 0; // SQLITE_OK
     }
 
-    result.tokens = static_cast<JiebaToken*>(
-        std::malloc(result.count * sizeof(JiebaToken)));
+    // Sort words in-place:
+    // Primary: ascending offset.
+    // Secondary: descending length (word size) so the longest token comes first for FTS5 colocated handling.
+    std::sort(words.begin(), words.end(), [](const cppjieba::Word& lhs, const cppjieba::Word& rhs) {
+        if (lhs.offset != rhs.offset) {
+            return lhs.offset < rhs.offset;
+        }
+        return lhs.word.size() > rhs.word.size();
+    });
 
-    if (!result.tokens) {
-        result.count = 0;
-        return result;
+    uint32_t prev_offset = -1;
+    uint32_t last_emitted_offset = -1;
+    std::string last_emitted_word = "";
+    for (const auto& w : words) {
+        if (w.offset == last_emitted_offset && w.word == last_emitted_word) {
+            continue; // Skip duplicate token at the same offset
+        }
+        bool is_col = (w.offset == prev_offset);
+        int rc = callback(ctx, w.offset, static_cast<uint32_t>(w.word.size()), is_col ? 1 : 0);
+        if (rc != 0) {
+            return rc; // Callback aborted
+        }
+        last_emitted_offset = w.offset;
+        last_emitted_word = w.word;
+        if (!is_col) {
+            prev_offset = w.offset;
+        }
     }
-
-    for (size_t i = 0; i < words.size(); ++i) {
-        result.tokens[i].word   = strdup(words[i].word.c_str());
-        result.tokens[i].offset = words[i].offset;
-        result.tokens[i].length = static_cast<uint32_t>(words[i].word.size());
-    }
-
-    return result;
+    return 0; // SQLITE_OK
 }
 
 // MARK: - C API
@@ -77,7 +83,6 @@ JiebaHandle jieba_create(const char* dict_path,
             user_dict_path ? user_dict_path : ""
         );
     } catch (...) {
-        // cppjieba throws XCHECK failures on missing/malformed files.
         return nullptr;
     }
 }
@@ -86,45 +91,69 @@ void jieba_free(JiebaHandle handle) {
     delete static_cast<JiebaSegmenter*>(handle);
 }
 
-JiebaTokenList jieba_cut(JiebaHandle handle,
-                          const char* text,
-                          size_t      len) {
-    if (!handle || !text || len == 0) {
-        return JiebaTokenList{nullptr, 0};
+int jieba_cut(JiebaHandle handle,
+              const char* text,
+              size_t      len,
+              void*       ctx,
+              JiebaTokenEmitCallback callback) {
+    if (!handle || !text || len == 0 || !callback) {
+        return 0; // SQLITE_OK
     }
     try {
         auto* seg = static_cast<JiebaSegmenter*>(handle);
-        std::vector<cppjieba::Word> words;
-        words.reserve(len / 3);
-        seg->mix_seg.Cut(std::string(text, len), words, /*hmm=*/true);
-        return build_token_list(words);
+        std::shared_lock<std::shared_mutex> lock(seg->rw_mutex); // Read Lock (shared lock)
+        
+        thread_local std::string tl_sentence;
+        thread_local std::vector<cppjieba::Word> tl_words;
+        
+        tl_sentence.assign(text, len);
+        tl_words.clear();
+        tl_words.reserve(len / 3);
+        
+        seg->mix_seg.Cut(tl_sentence, tl_words, /*hmm=*/true);
+        
+        return process_and_emit(tl_words, ctx, callback);
     } catch (...) {
-        return JiebaTokenList{nullptr, 0};
+        return 0;
     }
 }
 
-JiebaTokenList jieba_cut_for_search(JiebaHandle handle,
-                                     const char* text,
-                                     size_t      len) {
-    if (!handle || !text || len == 0) {
-        return JiebaTokenList{nullptr, 0};
+int jieba_cut_for_search(JiebaHandle handle,
+                         const char* text,
+                         size_t      len,
+                         void*       ctx,
+                         JiebaTokenEmitCallback callback) {
+    if (!handle || !text || len == 0 || !callback) {
+        return 0; // SQLITE_OK
     }
     try {
         auto* seg = static_cast<JiebaSegmenter*>(handle);
-        std::vector<cppjieba::Word> words;
-        words.reserve(len / 2);
-        seg->query_seg.Cut(std::string(text, len), words, /*hmm=*/true);
-        return build_token_list(words);
+        std::shared_lock<std::shared_mutex> lock(seg->rw_mutex); // Read Lock (shared lock)
+        
+        thread_local std::string tl_sentence;
+        thread_local std::vector<cppjieba::Word> tl_words;
+        
+        tl_sentence.assign(text, len);
+        tl_words.clear();
+        tl_words.reserve(len / 2);
+        
+        seg->query_seg.Cut(tl_sentence, tl_words, /*hmm=*/true);
+        
+        return process_and_emit(tl_words, ctx, callback);
     } catch (...) {
-        return JiebaTokenList{nullptr, 0};
+        return 0;
     }
 }
 
-void jieba_token_list_free(JiebaTokenList list) {
-    for (size_t i = 0; i < list.count; ++i) {
-        free(const_cast<char*>(list.tokens[i].word));
+void jieba_insert_user_word(JiebaHandle handle, const char* word) {
+    if (!handle || !word) return;
+    try {
+        auto* seg = static_cast<JiebaSegmenter*>(handle);
+        std::unique_lock<std::shared_mutex> lock(seg->rw_mutex); // Write Lock (exclusive lock)
+        seg->dict_trie.InsertUserWord(word);
+    } catch (...) {
+        // Suppress errors
     }
-    free(list.tokens);
 }
 
 } // extern "C"

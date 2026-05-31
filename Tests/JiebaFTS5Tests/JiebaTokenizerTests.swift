@@ -15,7 +15,7 @@ class JiebaTokenizerTests: XCTestCase {
     // MARK: - Test Helpers
 
     /// Opens an in-memory DatabaseQueue with JiebaTokenizer registered.
-    private func makeDB(caseFolding: Bool = true) throws -> DatabaseQueue {
+    func makeDB(caseFolding: Bool = true) throws -> DatabaseQueue {
         var config = Configuration()
         config.prepareDatabase { db in db.add(tokenizer: JiebaTokenizer.self) }
         let db = try DatabaseQueue(configuration: config)
@@ -29,7 +29,7 @@ class JiebaTokenizerTests: XCTestCase {
     }
 
     /// Returns a raw tokenizer instance (not backed by FTS5 index).
-    private func makeTokenizer(caseFolding: Bool = true) throws -> any FTS5Tokenizer {
+    func makeTokenizer(caseFolding: Bool = true) throws -> any FTS5Tokenizer {
         var config = Configuration()
         config.prepareDatabase { db in db.add(tokenizer: JiebaTokenizer.self) }
         let db = try DatabaseQueue(configuration: config)
@@ -38,14 +38,14 @@ class JiebaTokenizerTests: XCTestCase {
         }
     }
 
-    private func insert(_ text: String, into db: DatabaseQueue) throws {
+    func insert(_ text: String, into db: DatabaseQueue) throws {
         try db.write { db in
             try db.execute(sql: "INSERT INTO docs(content) VALUES (?)",
                            arguments: [text])
         }
     }
 
-    private func count(query: String, in db: DatabaseQueue) throws -> Int {
+    func count(query: String, in db: DatabaseQueue) throws -> Int {
         guard !query.isEmpty else { return 0 }
         return try db.read { db in
             let pattern = FTS5Pattern(matchingPhrase: query)
