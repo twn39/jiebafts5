@@ -280,4 +280,149 @@ class JiebaTokenizerAdvancedTests: XCTestCase {
         XCTAssertEqual(try count(query: "三〇一医院", in: db), 1)
         XCTAssertEqual(try count(query: "三〇一", in: db), 1)
     }
+
+    // MARK: - 7. Additional Edge Cases
+
+    func testAllFoldingDisabled() throws {
+        // Path 1 test: caseFolding=false, widthFolding=false, diacriticFolding=false
+        let db = try makeDB(caseFolding: false, widthFolding: false, diacriticFolding: false)
+        try insert("Apple café Ａｐｐｌｅ", into: db)
+        
+        // caseFolding disabled: "apple" (lowercase) should NOT match "Apple"
+        let countLower = try db.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM docs WHERE docs MATCH '\"apple\"'") ?? 0
+        }
+        XCTAssertEqual(countLower, 0, "Should not match lowercase when case folding is disabled")
+
+        let countUpper = try db.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM docs WHERE docs MATCH '\"Apple\"'") ?? 0
+        }
+        XCTAssertEqual(countUpper, 1, "Should match exact case when case folding is disabled")
+        
+        // diacriticFolding disabled: "cafe" should NOT match "café"
+        let countCafeNoDiacritics = try db.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM docs WHERE docs MATCH '\"cafe\"'") ?? 0
+        }
+        XCTAssertEqual(countCafeNoDiacritics, 0)
+
+        let countCafeDiacritics = try db.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM docs WHERE docs MATCH '\"café\"'") ?? 0
+        }
+        XCTAssertEqual(countCafeDiacritics, 1)
+        
+        // widthFolding disabled: "apple" (half-width) should NOT match "Ａｐｐｌｅ" (full-width)
+        let countHalfWidth = try db.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM docs WHERE docs MATCH '\"apple\"'") ?? 0
+        }
+        XCTAssertEqual(countHalfWidth, 0)
+    }
+
+    func testNullByteInDocument() throws {
+        // Direct tokenizer invocation: SQLite limits indexing on null bytes,
+        // so we test our tokenizer behavior directly by feeding a buffer containing null bytes.
+        var config = Configuration()
+        config.prepareDatabase { db in db.add(tokenizer: JiebaTokenizer.self) }
+        let db = try DatabaseQueue(configuration: config)
+        let tok = try db.read { db in
+            try db.makeTokenizer(.jieba())
+        }
+        
+        // "北京\0大学"
+        let rawBytes: [UInt8] = Array("北京".utf8) + [0] + Array("大学".utf8)
+        
+        class TokenAccumulator {
+            var tokens: [String] = []
+        }
+        let accumulator = TokenAccumulator()
+        let contextPointer = Unmanaged.passUnretained(accumulator).toOpaque()
+        
+        let rc = rawBytes.withUnsafeBufferPointer { buf in
+            tok.tokenize(
+                context: contextPointer,
+                tokenization: .document,
+                pText: UnsafeRawPointer(buf.baseAddress!).assumingMemoryBound(to: CChar.self),
+                nText: CInt(buf.count)
+            ) { ctx, _, tokenPtr, tokenLen, _, _ in
+                guard let ctx else { return SQLITE_OK }
+                let accum = Unmanaged<TokenAccumulator>.fromOpaque(ctx).takeUnretainedValue()
+                guard let tokenPtr else { return SQLITE_OK }
+                
+                let slice = UnsafeRawBufferPointer(start: tokenPtr, count: Int(tokenLen))
+                if let str = String(bytes: slice, encoding: .utf8) {
+                    accum.tokens.append(str)
+                }
+                return SQLITE_OK
+            }
+        }
+        
+        XCTAssertEqual(rc, SQLITE_OK, "Tokenizer should run successfully with null bytes")
+        XCTAssertTrue(accumulator.tokens.contains("北京"), "Tokens before null byte should be extracted")
+        XCTAssertTrue(accumulator.tokens.contains("大学"), "Tokens after null byte should be extracted")
+    }
+
+    func testVeryLongUppercaseASCIIToken() throws {
+        let db = try makeDB()
+        // Word size = 6000, all uppercase letters.
+        // This will trigger Path 2 (ASCII lowercase check) and fall back from stack allocation to heap allocation in withUnsafeTemporaryAllocation.
+        let longUpperToken = String(repeating: "K", count: 6000)
+        
+        XCTAssertNoThrow(try insert(longUpperToken, into: db))
+        
+        // Searching for lowercased version should succeed.
+        let longLowerToken = String(repeating: "k", count: 6000)
+        XCTAssertEqual(try count(query: longLowerToken, in: db), 1, "Extremely long uppercase ASCII token should fold and match lowercased query")
+    }
+
+    func testEmojiAndSymbols() throws {
+        let db = try makeDB()
+        
+        // Document: "你好 😊 🚀 + = 中文"
+        try insert("你好 😊 🚀 + = 中文", into: db)
+        
+        // Create fts5vocab table to verify term indexing
+        try db.write { db in
+            try db.execute(sql: "CREATE VIRTUAL TABLE temp.emoji_vocab USING fts5vocab(main, docs, 'instance')")
+        }
+        
+        // Fetch all terms
+        let rows = try db.read { db in
+            try Row.fetchAll(db, sql: "SELECT term FROM temp.emoji_vocab")
+        }
+        let terms = Set(rows.compactMap { $0["term"] as String? })
+        
+        // Check that alphanumeric words are indexed.
+        XCTAssertTrue(terms.contains("你好"))
+        XCTAssertTrue(terms.contains("中文"))
+        
+        // Check that emojis and mathematical operators are ignored (i.e. not indexed).
+        XCTAssertFalse(terms.contains("😊"))
+        XCTAssertFalse(terms.contains("🚀"))
+        XCTAssertFalse(terms.contains("+"))
+        XCTAssertFalse(terms.contains("="))
+    }
+
+    func testStopwordsExcludedFromVocabTable() throws {
+        let db = try makeDB(stopwords: ["的", "了", "the"])
+        
+        try insert("苹果的秘密 and the banana", into: db)
+        
+        // Create fts5vocab table
+        try db.write { db in
+            try db.execute(sql: "CREATE VIRTUAL TABLE temp.vocab USING fts5vocab(main, docs, 'instance')")
+        }
+        
+        // Fetch all terms
+        let rows = try db.read { db in
+            try Row.fetchAll(db, sql: "SELECT term FROM temp.vocab")
+        }
+        let terms = Set(rows.compactMap { $0["term"] as String? })
+        
+        // Verify indexed terms do not contain the stopwords
+        XCTAssertFalse(terms.contains("的"), "Stopword '的' should not exist in vocab table")
+        XCTAssertFalse(terms.contains("the"), "Stopword 'the' should not exist in vocab table")
+        
+        // Verify other terms are present
+        XCTAssertTrue(terms.contains("苹果"), "Normal token '苹果' should exist")
+        XCTAssertTrue(terms.contains("banana"), "Normal token 'banana' should exist")
+    }
 }

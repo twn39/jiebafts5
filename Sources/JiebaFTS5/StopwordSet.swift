@@ -18,8 +18,9 @@ public struct StopwordSet: Sendable {
 
     /// Initializes and normalizes the stopwords.
     public init(stopwords: Set<String>, options: JiebaTokenizerOptions) {
-        let normalizedWords = stopwords.map { word -> [UInt8] in
+        let normalizedWords = stopwords.compactMap { word -> [UInt8]? in
             let folded = StopwordSet.normalizeWord(word, options: options)
+            guard !folded.isEmpty else { return nil }
             return Array(folded.utf8)
         }
 
