@@ -1,15 +1,20 @@
 # JiebaFTS5
 
-A Swift Package that integrates [cppjieba](https://github.com/yanyiwu/cppjieba) with [GRDB](https://github.com/groue/GRDB.swift) as a custom FTS5 tokenizer, enabling high-quality Chinese full-text search in SQLite on iOS and macOS.
+A Swift Package that integrates [cppjieba](https://github.com/yanyiwu/cppjieba) with [GRDB](https://github.com/groue/GRDB.swift) as a custom FTS5 tokenizer, enabling high-performance, memory-efficient Chinese full-text search in SQLite on iOS and macOS.
 
 ## Features
 
-- **Jieba word segmentation** — accurate Chinese tokenization via cppjieba's MixSeg (MP + HMM) and QuerySeg algorithms
-- **COLOCATED synonym indexing** — sub-words (`清华`, `大学`) are indexed alongside the full compound (`清华大学`), enabling partial-word search without false positives (FTS5 Method 3)
-- **Zero-copy token emission** — tokens are emitted directly from SQLite's own buffer with no intermediate heap allocation
-- **Case folding** — optional ASCII/Latin lowercasing, with a stack-buffer fast path for uppercase ASCII and Unicode-aware folding for full-width characters
-- **Memory-efficient** — one shared cppjieba engine (~25 MB) across all `DatabasePool` connections via a process-lifetime singleton
-- **Thread-safe** — `static let` initialisation; all post-init C calls are read-only
+- **Jieba Word Segmentation** — Accurate Chinese tokenization via cppjieba's MixSeg (MP + HMM) and QuerySeg algorithms.
+- **COLOCATED Synonym Indexing** — Sub-words (e.g., `清华`, `大学`) are indexed alongside the full compound (`清华大学`), enabling partial-word search without false positives (FTS5 Method 3).
+- **Zero-Allocation Token Emission** — Direct token output from SQLite's buffer without any heap allocations on hot paths (CJK characters and ASCII).
+- **Unicode folding** — Fully customizable folding pipeline:
+  - **Case Folding**: Converts ASCII & Unicode characters to lowercase.
+  - **Width Folding**: Normalizes full-width alphanumeric characters (NFKC mapping).
+  - **Diacritic Folding**: Strips accent marks (e.g., `café` -> `cafe`).
+  - **CJK Block Fast Path**: Bypasses Foundation Unicode string folding for CJK unified ideographs (`U+4E00`-`U+9FFF`), keeping CJK tokenization entirely heap-allocation-free.
+- **Stopwords Filtering** — High-performance flat byte buffer container with pointer-based, bounds-checking-free binary search for high-frequency stopword exclusion on hot paths.
+- **Dynamic User Dictionary** — Safe thread-local runtime insertion of user dictionary terms (`insertUserWord(_:)`) protected by C++ `std::shared_mutex` to allow concurrent indexing and lookups without thread contention.
+- **Preallocated Thread-Local Buffers** — C++ layer utilizes `thread_local` caching for std::string and std::vector to avoid allocation-contention and heap allocations during indexing loop iterations.
 
 ## Usage
 
@@ -30,11 +35,22 @@ let dbPool = try DatabasePool(path: path, configuration: config)
 ```swift
 try dbPool.write { db in
     try db.create(virtualTable: "articles", using: FTS5()) { t in
-        t.tokenizer = .jieba()          // caseFolding: true (default)
+        // Default options: caseFolding: true, widthFolding: true, diacriticFolding: true, stopwords: nil
+        t.tokenizer = .jieba()
         t.column("title")
         t.column("body")
     }
 }
+```
+
+#### Customizing folding & stopwords:
+```swift
+t.tokenizer = .jieba(
+    caseFolding: true,
+    widthFolding: true,
+    diacriticFolding: true,
+    stopwords: ["的", "了", "和", "the", "a"]
+)
 ```
 
 ### 3. Insert and search
@@ -59,11 +75,13 @@ try dbPool.read { db in
 }
 ```
 
-### 4. Case-sensitive search
+### 4. Dynamic User Dictionary Insertion
 
+To insert custom vocabularies dynamically at runtime without restarting the engine:
 ```swift
-t.tokenizer = .jieba(caseFolding: false)
+JiebaEngine.shared.insertUserWord("男默女泪")
 ```
+This operation is thread-safe and safely isolated under exclusive write locks.
 
 ### 5. Snippet highlighting
 
@@ -95,6 +113,45 @@ func application(_ application: UIApplication,
     return true
 }
 ```
+
+---
+
+## Performance & Benchmarks
+
+The benchmarks below were measured by indexing a **2.82 MB** corpus consisting of 5,000 mixed CJK and English documents on a **macOS 10-core M-series processor** in Release mode (`-c release`).
+
+### Raw Tokenizer Throughput (pure CPU segmentation)
+*Measures direct calling of the custom tokenizer on CPU, excluding SQLite database IO.*
+
+| Configuration | Time (ms) | Throughput (MB/s) |
+| :--- | :---: | :---: |
+| **Jieba (Default)** | 205.49 | **13.71** |
+| **Jieba (With Stopwords)** | 185.78 | **15.16** |
+| **Jieba (No Folding)** | 168.34 | **16.73** |
+
+### FTS5 Indexing Throughput
+*Measures end-to-end SQLite virtual table batch insertion and FTS5 index building (includes DB I/O & B-tree updates).*
+
+| Virtual Table Tokenizer | Time (ms) | Throughput (MB/s) |
+| :--- | :---: | :---: |
+| **Jieba (Default)** | 225.63 | **12.49** |
+| **Jieba (With Stopwords)** | 229.14 | **12.29** |
+| **SQLite unicode61 (Reference)** | 60.70 | 46.41 |
+
+*(To reproduce the results, run `swift test -c release --filter JiebaPerformanceTests`)*
+
+---
+
+## CI & Testing
+
+Every commit and pull request is automatically verified via a parallel test matrix on GitHub Actions:
+- **Environment**: `macos-14`
+- **Swift Versions**: `5.9`, `5.10`, `6.0`
+- **GRDB.swift Versions**: `7.5.0`, `7.8.0`, `7.10.0`
+
+Our test suite contains 64 rigorous test cases covering concurrency stress tests, memory allocation trackers, Unicode folding matrices, dynamic dictionary mutations, and malformed C-string boundaries.
+
+---
 
 ## License
 
