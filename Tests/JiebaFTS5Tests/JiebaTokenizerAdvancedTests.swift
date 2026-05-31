@@ -236,4 +236,48 @@ class JiebaTokenizerAdvancedTests: XCTestCase {
         XCTAssertTrue(terms.contains("北京"))
         XCTAssertTrue(terms.contains("大学"))
     }
+
+    // MARK: - 6. Edge Cases
+
+    func testMalformedUTF8Input() throws {
+        var config = Configuration()
+        config.prepareDatabase { db in db.add(tokenizer: JiebaTokenizer.self) }
+        let db = try DatabaseQueue(configuration: config)
+        let tok = try db.read { db in
+            try db.makeTokenizer(.jieba())
+        }
+        
+        // 0xFF and 0xFE are invalid UTF-8 bytes.
+        let invalidBytes: [CChar] = [0xFF, 0xFE, 0].map { CChar(bitPattern: $0) }
+        
+        let rc = invalidBytes.withUnsafeBufferPointer { buf in
+            tok.tokenize(
+                context: nil,
+                tokenization: .document,
+                pText: buf.baseAddress,
+                nText: CInt(buf.count - 1)
+            ) { _, _, _, _, _, _ in
+                return SQLITE_OK
+            }
+        }
+        XCTAssertEqual(rc, SQLITE_OK, "Tokenizer should handle malformed UTF-8 gracefully without crashing")
+    }
+
+    func testVeryLongToken() throws {
+        let db = try makeDB()
+        let longToken = String(repeating: "A", count: 2000)
+        try insert(longToken, into: db)
+        
+        XCTAssertEqual(try count(query: longToken, in: db), 1, "Extremely long token should be indexed and searchable")
+    }
+
+    func testCharactersOutsideCJKBlock() throws {
+        let db = try makeDB()
+        // '〇' is U+3007 (IDEOGRAPHIC NUMBER ZERO) which is outside CJK Unified Ideographs block U+4E00-U+9FFF.
+        // It should correctly fall back to Path 3 folding/normalization without any issues.
+        try insert("三〇一医院", into: db)
+        
+        XCTAssertEqual(try count(query: "三〇一医院", in: db), 1)
+        XCTAssertEqual(try count(query: "三〇一", in: db), 1)
+    }
 }
