@@ -4,6 +4,7 @@
 // Performance benchmarks for JiebaFTS5 custom tokenizer.
 
 import XCTest
+import Foundation
 import GRDB
 #if canImport(GRDBSQLite)
 import GRDBSQLite
@@ -276,7 +277,12 @@ final class JiebaPerformanceTests: XCTestCase {
         print(mdReport)
         
         // Save to benchmark_results.md in the package root
-        let repoRoot = "/Users/2342184/programs/jiebafts5/jiebafts5"
+        let currentFile = #filePath
+        let repoRoot = URL(fileURLWithPath: currentFile)
+            .deletingLastPathComponent() // JiebaFTS5Tests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // jiebafts5
+            .path
         do {
             try mdReport.write(toFile: "\(repoRoot)/benchmark_results.md", atomically: true, encoding: .utf8)
         } catch {
