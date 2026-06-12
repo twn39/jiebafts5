@@ -68,7 +68,7 @@ public final class JiebaEngine: @unchecked Sendable {
     public static func configure(dictPath: String, hmmPath: String, userDictPath: String) {
         lock.lock()
         defer { lock.unlock() }
-        
+
         guard _shared == nil else {
             NSLog("[JiebaFTS5] Warning: JiebaEngine has already been initialized. Configuration ignored.")
             return
@@ -125,12 +125,12 @@ public final class JiebaEngine: @unchecked Sendable {
 
     /// Precise segmentation (MixSeg: MP + HMM) with zero-allocation callback pass-through.
     func cut(_ pText: UnsafePointer<CChar>, count: Int, context: UnsafeMutableRawPointer, callback: JiebaTokenEmitCallback) -> Int32 {
-        return jieba_cut(handle, pText, count, context, callback)
+        jieba_cut(handle, pText, count, context, callback)
     }
 
     /// Search-engine segmentation (QuerySeg) with zero-allocation callback pass-through.
     func cutForSearch(_ pText: UnsafePointer<CChar>, count: Int, context: UnsafeMutableRawPointer, callback: JiebaTokenEmitCallback) -> Int32 {
-        return jieba_cut_for_search(handle, pText, count, context, callback)
+        jieba_cut_for_search(handle, pText, count, context, callback)
     }
 
     // MARK: Dynamic Dictionary

@@ -194,7 +194,7 @@ extension JiebaTokenizerTests {
 extension JiebaTokenizerTests {
     func testEngineConfigureAndShutdown() throws {
         JiebaEngine.shutdown()
-        
+
         guard
             let dictPath = Bundle.module.path(forResource: "jieba.dict", ofType: "utf8"),
             let hmmPath  = Bundle.module.path(forResource: "hmm_model", ofType: "utf8"),
@@ -203,13 +203,13 @@ extension JiebaTokenizerTests {
             XCTFail("Default dictionary files not found")
             return
         }
-        
+
         JiebaEngine.configure(dictPath: dictPath, hmmPath: hmmPath, userDictPath: userPath)
-        
+
         let db = try makeDB()
         try insert("人工智能很强大", into: db)
         XCTAssertEqual(try self.count(query: "人工智能", in: db), 1)
-        
+
         JiebaEngine.shutdown()
     }
 }
@@ -219,15 +219,15 @@ extension JiebaTokenizerTests {
 extension JiebaTokenizerTests {
     func testDynamicUserWordInsertion() throws {
         let tok = try makeTokenizer(caseFolding: true)
-        
+
         let rawTokensBefore = try tok.tokenize(query: "男默女泪")
         XCTAssertFalse(rawTokensBefore.map { $0.token }.contains("男默女泪"), "Before insert, '男默女泪' should not be a single word")
-        
+
         JiebaEngine.shared.insertUserWord("男默女泪")
-        
+
         let rawTokensAfter = try tok.tokenize(query: "男默女泪")
         XCTAssertTrue(rawTokensAfter.map { $0.token }.contains("男默女泪"), "After insert, '男默女泪' must be identified as a single word")
-        
+
         JiebaEngine.shutdown()
     }
 }
@@ -245,20 +245,20 @@ extension JiebaTokenizerTests {
                 t.column("content")
             }
         }
-        
+
         try db.write { db in
             try db.execute(sql: "INSERT INTO docs(content) VALUES (?)", arguments: ["苹果和香蕉的秘密"])
         }
-        
+
         XCTAssertEqual(try self.count(query: "苹果", in: db), 1)
         XCTAssertEqual(try self.count(query: "和", in: db), 0, "Stopword '和' should be filtered out")
     }
-    
+
     func testWidthAndDiacriticFolding() throws {
         let tok = try makeTokenizer(caseFolding: true)
         let tokens = try tok.tokenize(document: "Ａｐｐｌｅ café")
         print("DEBUG TOKENS: \(tokens.map { $0.token })")
-        
+
         var config = Configuration()
         config.prepareDatabase { db in db.add(tokenizer: JiebaTokenizer.self) }
         let db = try DatabaseQueue(configuration: config)
@@ -268,11 +268,11 @@ extension JiebaTokenizerTests {
                 t.column("content")
             }
         }
-        
+
         try db.write { db in
             try db.execute(sql: "INSERT INTO docs(content) VALUES (?)", arguments: ["Ａｐｐｌｅ café"])
         }
-        
+
         XCTAssertEqual(try self.count(query: "a", in: db), 1, "Single full-width 'Ａ' folded to 'a' should match query 'a'")
         XCTAssertEqual(try db.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM docs WHERE docs MATCH '\"caf\" \"e\"'") ?? 0

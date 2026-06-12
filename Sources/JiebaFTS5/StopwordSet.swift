@@ -7,12 +7,12 @@ import Foundation
 
 /// High-performance container for stopwords.
 public struct StopwordSet: Sendable {
-    
+
     private struct WordRange: Sendable {
         let offset: Int
         let length: Int
     }
-    
+
     private let flatBytes: [UInt8]
     private let ranges: [WordRange]
 
@@ -80,7 +80,7 @@ public struct StopwordSet: Sendable {
     /// Search helper for CChar pointer.
     @inline(__always)
     public func contains(_ bytes: UnsafePointer<CChar>, count: Int) -> Bool {
-        return bytes.withMemoryRebound(to: UInt8.self, capacity: count) { ptr in
+        bytes.withMemoryRebound(to: UInt8.self, capacity: count) { ptr in
             let buffer = UnsafeBufferPointer(start: ptr, count: count)
             return contains(buffer)
         }
@@ -126,7 +126,7 @@ public struct StopwordSet: Sendable {
         let minLen = min(target.count, length)
         guard let tPtr = target.baseAddress,
               let sPtr = flatBuf.baseAddress else { return 0 }
-        
+
         let sStart = sPtr.advanced(by: offset)
         for i in 0..<minLen {
             let tByte = tPtr[i]

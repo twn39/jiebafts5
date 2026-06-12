@@ -64,8 +64,8 @@ public struct JiebaTokenizerOptions: Sendable, Equatable {
 
     var arguments: [String] {
         var args: [String] = []
-        if !caseFolding      { args.append("no_case_fold") }
-        if !widthFolding     { args.append("no_width_fold") }
+        if !caseFolding { args.append("no_case_fold") }
+        if !widthFolding { args.append("no_width_fold") }
         if !diacriticFolding { args.append("no_diacritic_fold") }
         if let stopwords, !stopwords.isEmpty {
             args.append("stopwords")
@@ -78,7 +78,7 @@ public struct JiebaTokenizerOptions: Sendable, Equatable {
         caseFolding      = !arguments.contains("no_case_fold")
         widthFolding     = !arguments.contains("no_width_fold")
         diacriticFolding = !arguments.contains("no_diacritic_fold")
-        
+
         if let idx = arguments.firstIndex(of: "stopwords"), idx + 1 < arguments.count {
             let listStr = arguments[idx + 1]
             let words = listStr.split(separator: ",").map(String.init)
