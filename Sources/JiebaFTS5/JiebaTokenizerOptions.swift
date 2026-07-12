@@ -25,16 +25,22 @@ public struct JiebaTokenizerOptions: Sendable, Equatable {
     /// Optional custom stopwords. If empty or nil, no stopword filtering is performed.
     public var stopwords: Set<String>?
 
+    /// Optional named engine registered via `JiebaEngine.register(name:engine:)`.
+    /// `nil` / empty / `"shared"` / `"default"` → process ``JiebaEngine/shared``.
+    public var engineName: String?
+
     public init(
         caseFolding: Bool = true,
         widthFolding: Bool = true,
         diacriticFolding: Bool = true,
-        stopwords: Set<String>? = nil
+        stopwords: Set<String>? = nil,
+        engineName: String? = nil
     ) {
         self.caseFolding = caseFolding
         self.widthFolding = widthFolding
         self.diacriticFolding = diacriticFolding
         self.stopwords = stopwords
+        self.engineName = engineName
     }
 
     // MARK: Named profiles
@@ -78,6 +84,13 @@ public struct JiebaTokenizerOptions: Sendable, Equatable {
                 args.append(stopwords.sorted().joined(separator: ","))
             }
         }
+        if let engineName {
+            let key = engineName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty, key != "shared", key != "default" {
+                args.append("engine")
+                args.append(key)
+            }
+        }
         return args
     }
 
@@ -95,6 +108,13 @@ public struct JiebaTokenizerOptions: Sendable, Equatable {
             stopwords = Set(words)
         } else {
             stopwords = nil
+        }
+
+        if let idx = arguments.firstIndex(of: "engine"), idx + 1 < arguments.count {
+            let key = arguments[idx + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+            engineName = key.isEmpty ? nil : key
+        } else {
+            engineName = nil
         }
     }
 }

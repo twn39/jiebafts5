@@ -61,6 +61,11 @@ int jieba_cut_for_search(JiebaHandle handle,
 /// Returns 1 on success, 0 on failure.
 int jieba_insert_user_word(JiebaHandle handle, const char* word);
 
+/// Inserts multiple user words under a **single** write lock.
+/// `words` is an array of `count` UTF-8 C strings (NULL entries are skipped).
+/// Returns the number of successful inserts.
+int jieba_insert_user_words(JiebaHandle handle, const char* const* words, size_t count);
+
 #ifdef __cplusplus
 }
 #endif

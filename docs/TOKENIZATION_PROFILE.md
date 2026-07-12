@@ -67,10 +67,11 @@ t.tokenizer = .jieba(options: opts)
 |---|---|
 | `stopwords_preset` + id | 内置预设：`en` / `zh` / `en+zh`（见 `StopwordPresets`） |
 | `stopwords` + CSV | 自定义列表（逗号分隔，顺序无关；编码时排序以保证稳定） |
+| `engine` + name | 命名引擎（须先 `JiebaEngine.register`）；省略则用 shared |
 
 ---
 
-## 4. 规范化顺序（与 TokenNormalizer 一致）
+## 4. 规范化顺序（与 TokenNormalizer / TokenEmitPipeline 一致）
 
 对非「纯 CJK 统一汉字」token：
 
@@ -78,10 +79,42 @@ t.tokenizer = .jieba(options: opts)
 2. 可选变音符折叠 + 大小写折叠（`String.folding`）
 3. 与按相同 options 构建的 `StopwordSet` 匹配
 
-纯 CJK（UTF-8 下全部为 U+4E00–U+9FFF 三字节序列）走零拷贝路径，不应用 Latin 折叠。
+### 4.1 纯 CJK 零拷贝快路径范围
+
+仅当 token 的 **每一个** UTF-8 码点都落在 **CJK Unified Ideographs `U+4E00`–`U+9FFF`**（三字节 `E4`–`E9` 序列）时：
+
+- 走零拷贝 emit（不经 Foundation、不做 Latin 折叠）
+- 仍会做 stopword 字节匹配
+
+**不在**此快路径内的示例（仍会分词，但可能走快折/慢路径）：
+
+- CJK 扩展区（Ext B/C/…）
+- 兼容汉字、部首、注音
+- 日文假名、韩文音节
+- 全角字母数字（由 width fold 处理）
+
+产品边界：默认优化「通用汉字」中文检索；扩展区/日韩请依赖慢路径或自定义字典，不要假设零分配。
+
+### 4.2 Emit 阶段顺序（实现契约）
+
+`TokenEmitPipeline` 固定顺序（改序即破坏索引/查询一致性）：
+
+0. 丢弃纯 ASCII 标点  
+1. 纯 CJK Unified → 零拷贝  
+2. 全部 folding 关闭 → 原始字节  
+3. 纯 ASCII → 可选栈上小写  
+4. Latin-1 / 全角 → 栈上 `tryFastFold`  
+5. 其余 → Foundation `normalizeWord`（堆）
+
+调试可用 `JiebaTokenizer.suggestTokens(for:asQuery:)` 观察与 FTS5 一致的 token 序列。
 
 ---
 
 ## 5. 引擎与字典
 
-见 [ENGINE_LIFECYCLE.md](ENGINE_LIFECYCLE.md)。字典缺失或 `jieba_create` 失败在当前版本仍会触发进程级失败（`fatalError`）；`configure` 须在首次使用 `shared` 之前调用。
+见 [ENGINE_LIFECYCLE.md](ENGINE_LIFECYCLE.md)。
+
+- 可恢复加载：`try JiebaEngine.bootstrap()` / `try JiebaEngine.make(...)` 抛出 `JiebaEngineError`。
+- `JiebaEngine.shared` 失败时仍 `fatalError`（FTS5 注册便捷路径）。
+- `configure` 须在首次使用 shared/bootstrap 之前调用。
+- `insertUserWord` **不会**自动重建已有 FTS5 行；见生命周期文档 §3.1。

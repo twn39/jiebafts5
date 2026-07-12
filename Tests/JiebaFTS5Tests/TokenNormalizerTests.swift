@@ -119,7 +119,7 @@ final class TokenNormalizerTests: XCTestCase {
 
     func testConfigureReturnsBool() {
         // If already warm from other tests, configure should return false without crashing.
-        _ = JiebaEngine.shared
+        _ = try? JiebaEngine.bootstrap()
         let ok = JiebaEngine.configure(
             dictPath: "/tmp/nope.dict",
             hmmPath: "/tmp/nope.hmm",
@@ -127,5 +127,118 @@ final class TokenNormalizerTests: XCTestCase {
         )
         XCTAssertFalse(ok)
         XCTAssertTrue(JiebaEngine.isInitialized)
+    }
+
+    func testBootstrapSucceedsWithBundleDefaults() throws {
+        // May already be warm; bootstrap is idempotent once shared exists.
+        let engine = try JiebaEngine.bootstrap()
+        XCTAssertTrue(JiebaEngine.isInitialized)
+        _ = engine
+    }
+
+    func testMakeThrowsOnMissingPaths() {
+        XCTAssertThrowsError(
+            try JiebaEngine.make(
+                dictPath: "/tmp/jiebafts5-missing-dict-\(UUID().uuidString)",
+                hmmPath: "/tmp/jiebafts5-missing-hmm-\(UUID().uuidString)",
+                userDictPath: "/tmp/jiebafts5-missing-user-\(UUID().uuidString)"
+            )
+        ) { error in
+            guard case JiebaEngineError.missingDictionaryFiles = error else {
+                XCTFail("expected missingDictionaryFiles, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testSuggestTokensDocumentHasColocatedForCompound() {
+        let tokens = JiebaTokenizer.suggestTokens(for: "清华大学", options: .init(), asQuery: false)
+        XCTAssertFalse(tokens.isEmpty)
+        XCTAssertTrue(tokens.contains(where: { $0.text == "清华大学" && !$0.isColocated }))
+        // QuerySeg typically emits colocated subwords for compounds.
+        XCTAssertTrue(
+            tokens.contains(where: { $0.isColocated }),
+            "document mode should emit colocated sub-tokens for 清华大学; got \(tokens)"
+        )
+    }
+
+    func testSuggestTokensRespectsRecommendedStopwords() {
+        let tokens = JiebaTokenizer.suggestTokens(
+            for: "the 的 苹果",
+            options: .recommended,
+            asQuery: false
+        )
+        let texts = Set(tokens.map(\.text))
+        XCTAssertFalse(texts.contains("the"))
+        XCTAssertFalse(texts.contains("的"))
+        XCTAssertTrue(texts.contains("苹果") || texts.contains(where: { $0.contains("苹") }))
+    }
+
+    func testChineseStopwordPresetExpanded() {
+        XCTAssertGreaterThan(StopwordPresets.chinese.count, 80)
+        XCTAssertTrue(StopwordPresets.chinese.contains("因为"))
+        XCTAssertTrue(StopwordPresets.chinese.contains("可以"))
+        XCTAssertEqual(StopwordPresets.presetID(matching: StopwordPresets.chinese), "zh")
+    }
+
+    func testInsertUserWordsBatch() {
+        let engine = JiebaEngine.shared
+        let n = engine.insertUserWords(["批测词甲\(UUID().uuidString.prefix(6))", ""])
+        // Empty string should fail; at least one unique word should succeed.
+        XCTAssertGreaterThanOrEqual(n, 1)
+    }
+
+    func testNamedEngineRegistryAndOptionsRoundTrip() throws {
+        guard let paths = JiebaEngine.bundledDictionaryPaths else {
+            XCTFail("bundled dictionaries missing")
+            return
+        }
+        let name = "test_engine_\(UUID().uuidString.prefix(8))"
+        let eng = try JiebaEngine.make(
+            dictPath: paths.dictPath,
+            hmmPath: paths.hmmPath,
+            userDictPath: paths.userDictPath
+        )
+        XCTAssertTrue(JiebaEngine.register(name: name, engine: eng))
+        defer { JiebaEngine.unregister(name: name) }
+
+        var opts = JiebaTokenizerOptions()
+        opts.engineName = name
+        let args = opts.arguments
+        XCTAssertTrue(args.contains("engine"))
+        XCTAssertTrue(args.contains(name))
+        let decoded = JiebaTokenizerOptions(arguments: args)
+        XCTAssertEqual(decoded.engineName, name)
+
+        let resolved = try JiebaEngine.resolve(name: name)
+        XCTAssertTrue(resolved === eng)
+
+        let tok = JiebaTokenizer(engine: eng, options: .init())
+        let tokens = tok.suggestTokens(for: "北京", asQuery: true)
+        XCTAssertFalse(tokens.isEmpty)
+    }
+
+    func testResolveUnknownEngineNameThrows() {
+        XCTAssertThrowsError(try JiebaEngine.resolve(name: "no_such_engine_zzz")) { error in
+            guard case JiebaEngineError.unknownEngineName = error else {
+                XCTFail("expected unknownEngineName, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testReservedEngineNameRegistrationFails() throws {
+        guard let paths = JiebaEngine.bundledDictionaryPaths else {
+            XCTFail("bundled dictionaries missing")
+            return
+        }
+        let eng = try JiebaEngine.make(
+            dictPath: paths.dictPath,
+            hmmPath: paths.hmmPath,
+            userDictPath: paths.userDictPath
+        )
+        XCTAssertFalse(JiebaEngine.register(name: "shared", engine: eng))
+        XCTAssertFalse(JiebaEngine.register(name: "default", engine: eng))
+        XCTAssertFalse(JiebaEngine.register(name: "", engine: eng))
     }
 }

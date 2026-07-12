@@ -211,12 +211,19 @@ final class JiebaPerformanceTests: XCTestCase {
         ]
 
         // Generate Markdown Report
+        #if DEBUG
+        let buildConfig = "Debug"
+        #else
+        let buildConfig = "Release"
+        #endif
+
         var mdReport = """
         # JiebaTokenizer Complete Performance Benchmark Report
 
         - **Corpus Details**: Mixed Chinese/English text, \(docCount) documents.
         - **Corpus Size**: \(String(format: "%.2f", totalSizeMB)) MB (\(totalBytes) bytes).
         - **Platform**: \(ProcessInfo.processInfo.operatingSystemVersionString) (\(ProcessInfo.processInfo.activeProcessorCount) Cores).
+        - **Build**: \(buildConfig) (`swift test -c release` recommended for published numbers).
 
         ---
 
@@ -252,10 +259,11 @@ final class JiebaPerformanceTests: XCTestCase {
 
         mdReport += "\n\n*(测试结果在运行时自动计算生成)*\n"
 
-        print("🚀🚀🚀 [BENCHMARK SUITE COMPLETED] 🚀🚀🚀")
+        print("🚀🚀🚀 [BENCHMARK SUITE COMPLETED] (\(buildConfig)) 🚀🚀🚀")
         print(mdReport)
 
-        // Save to benchmark_results.md in the package root
+        // Only persist Release numbers so Debug runs do not clobber README-facing metrics.
+        #if !DEBUG
         let currentFile = #filePath
         let repoRoot = URL(fileURLWithPath: currentFile)
             .deletingLastPathComponent() // JiebaFTS5Tests
@@ -268,5 +276,8 @@ final class JiebaPerformanceTests: XCTestCase {
             print("❌ Failed to write benchmark report: \(error)")
             XCTFail("Failed to write benchmark report: \(error)")
         }
+        #else
+        print("ℹ️ [INFO] Debug build: skipped writing benchmark_results.md (run with -c release to update the file).")
+        #endif
     }
 }

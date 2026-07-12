@@ -91,8 +91,12 @@ To insert custom vocabularies dynamically at runtime without restarting the engi
 ```swift
 let ok = JiebaEngine.shared.insertUserWord("男默女泪")
 // ok == false if insertion failed
+
+let n = JiebaEngine.shared.insertUserWords(["专有名词A", "专有名词B"])
 ```
-This operation is thread-safe and safely isolated under exclusive write locks.
+This operation is thread-safe (C++ `shared_mutex`).
+
+**Important:** Inserts only affect **subsequent** tokenization. Existing FTS5 rows are **not** rebuilt — re-insert/update those documents if they must match the new terms.
 
 ### 5. Snippet highlighting
 
@@ -107,23 +111,53 @@ let snippet = try db.read { db in
 // "<<清华大学>>是中国顶尖高校之一。"
 ```
 
-### 6. Preheat on app launch
+### 6. Preheat / bootstrap on app launch
 
-The engine takes 100–300 ms to initialise. Call `preheat()` at launch to avoid latency on the first search:
+The engine takes 100–300 ms to initialise. Prefer `bootstrap()` when you need recoverable errors; `preheat()` warms in the background:
 
 ```swift
-// SwiftUI
+// Recoverable load (recommended)
+do {
+    try JiebaEngine.bootstrap()
+} catch {
+    // Disable search or fall back; see docs/ENGINE_LIFECYCLE.md
+}
+
+// SwiftUI background warm
 @main struct MyApp: App {
     init() { JiebaEngine.preheat() }
 }
-
-// UIKit
-func application(_ application: UIApplication,
-                 didFinishLaunchingWithOptions launchOptions: ...) -> Bool {
-    JiebaEngine.preheat()
-    return true
-}
 ```
+
+### 7. Debug tokenization (`suggestTokens`)
+
+Inspect the exact tokens FTS5 would see (folding + stopwords applied):
+
+```swift
+let tokens = JiebaTokenizer.suggestTokens(
+    for: "清华大学 The quick",
+    options: .recommended,
+    asQuery: false
+)
+// tokens[].text / byteStart / isColocated
+```
+
+### 8. Named engines (multi-dictionary)
+
+```swift
+let eng = try JiebaEngine.make(dictPath: d, hmmPath: h, userDictPath: u)
+JiebaEngine.register(name: "legal", engine: eng)
+
+var opts = JiebaTokenizerOptions.recommended
+opts.engineName = "legal"
+t.tokenizer = .jieba(options: opts)
+```
+
+### Unicode / CJK fast path note
+
+Zero-allocation CJK emit applies to **CJK Unified Ideographs `U+4E00`–`U+9FFF` only**. Extension blocks, kana, hangul, etc. still segment correctly but may use the fold/slow paths. See [docs/TOKENIZATION_PROFILE.md](docs/TOKENIZATION_PROFILE.md).
+
+Dictionary packaging / trim: [docs/DICTIONARY_PACKAGING.md](docs/DICTIONARY_PACKAGING.md).
 
 ---
 
@@ -149,7 +183,8 @@ The benchmarks below were measured by indexing a **2.82 MB** corpus consisting o
 | **Jieba (With Stopwords)** | 229.14 | **12.29** |
 | **SQLite unicode61 (Reference)** | 60.70 | 46.41 |
 
-*(To reproduce the results, run `swift test -c release --filter JiebaPerformanceTests`)*
+*(To reproduce the results, run `swift test -c release --filter JiebaPerformanceTests`.  
+Debug test runs print numbers but **do not** overwrite `benchmark_results.md`.)*
 
 ---
 

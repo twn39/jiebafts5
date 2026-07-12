@@ -12,6 +12,9 @@ import Foundation
 /// t.tokenizer = .jieba(options: .recommended)
 /// t.tokenizer = .jieba(stopwords: StopwordPresets.english)
 /// ```
+///
+/// Chinese lists are intentionally high-frequency function words for FTS noise reduction,
+/// not a full NLP stopword corpus. Extend via custom `stopwords:` when needed.
 public enum StopwordPresets: Sendable {
 
     /// Default English stopwords.
@@ -34,10 +37,33 @@ public enum StopwordPresets: Sendable {
         "yourselves"
     ]
 
-    /// Default Chinese stopwords.
+    /// Default Chinese stopwords (common function words for FTS noise reduction).
     public static let chinese: Set<String> = [
+        // Classic high-frequency particles / pronouns
         "的", "了", "和", "是", "在", "我", "有", "这", "个", "他", "们", "就", "人", "都", "一", "而",
-        "及", "与", "也", "着", "它", "之", "为", "以", "所", "于", "上", "下", "那"
+        "及", "与", "也", "着", "它", "之", "为", "以", "所", "于", "上", "下", "那",
+        // Demonstratives / quantifiers / copula-adjacent
+        "你", "她", "我们", "你们", "他们", "她们", "它们", "自己", "什么", "怎么", "怎样", "为何",
+        "这个", "那个", "这些", "那些", "这里", "那里", "这么", "那么", "这样", "那样",
+        "一种", "一些", "有的", "每个", "任何", "其他", "其它", "某", "某个", "某些",
+        // Auxiliaries / aspect / mood
+        "会", "能", "可以", "可", "要", "应", "应该", "得", "到", "过", "来", "去", "出", "回",
+        "被", "把", "让", "给", "对", "向", "从", "比", "跟", "同", "并", "且", "或", "或者",
+        "而且", "但是", "但", "不过", "然而", "因此", "所以", "因为", "如果", "若", "虽", "虽然",
+        "然后", "接着", "于是", "此外", "另外", "同时", "其中",
+        // Structural / filler
+        "吗", "呢", "吧", "啊", "呀", "嘛", "啦", "哇", "哦", "嗯",
+        "很", "非常", "更", "最", "较", "挺", "太", "真", "已", "已经", "曾", "曾经", "正", "正在",
+        "还", "又", "再", "也是", "就是", "只是", "只有", "只要", "不仅", "不但",
+        "没有", "没", "无", "非", "不", "不是", "不会", "不能", "不要",
+        "请", "看", "说", "做", "让我们",
+        // Time / place light words often noisy in FTS
+        "年", "月", "日", "时", "分", "秒", "今", "今天", "昨天", "明天", "现在", "目前", "以前", "以后",
+        "中", "内", "外", "前", "后", "左", "右", "里", "间", "等", "等等",
+        // Numbers often stripped as stop-noise in full-text (optional; keep short digits only)
+        "二", "三", "四", "五", "六", "七", "八", "九", "十", "百", "千", "万",
+        // Common English-adjacent loan fillers used in CN text
+        "啊啊", "呵呵", "哈哈"
     ]
 
     /// English ∪ Chinese common stopwords.
