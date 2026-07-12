@@ -29,14 +29,11 @@ let package = Package(
             path: "Sources/CJiebaWrapper",
             publicHeadersPath: "include",
             cxxSettings: [
-                // cppjieba headers are in include/cppjieba/*.hpp (header-only).
-                // limonp headers are in deps/limonp/*.hpp; cppjieba includes
-                // them as "limonp/Foo.hpp" so deps/ must be the search root.
-                // Both directories are inside the package root to satisfy SPM's
-                // "no paths outside package root" constraint.
-                // Paths are relative to Sources/CJiebaWrapper/.
+                // cppjieba is header-only under include/cppjieba/*.hpp
+                // (vendored from upstream; limonp was removed in favor of
+                // cppjieba/Utils.hpp). Path is relative to Sources/CJiebaWrapper/
+                // and stays inside the package root for SPM.
                 .headerSearchPath("../../include"),
-                .headerSearchPath("../../deps"),
             ]
         ),
         // Swift FTS5 custom tokenizer.

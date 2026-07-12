@@ -12,50 +12,7 @@ import SQLite3
 
 class JiebaTokenizerTests: XCTestCase {
 
-    // MARK: - Test Helpers
-
-    /// Opens an in-memory DatabaseQueue with JiebaTokenizer registered.
-    func makeDB(caseFolding: Bool = true) throws -> DatabaseQueue {
-        var config = Configuration()
-        config.prepareDatabase { db in db.add(tokenizer: JiebaTokenizer.self) }
-        let db = try DatabaseQueue(configuration: config)
-        try db.write { db in
-            try db.create(virtualTable: "docs", using: FTS5()) { t in
-                t.tokenizer = .jieba(caseFolding: caseFolding)
-                t.column("content")
-            }
-        }
-        return db
-    }
-
-    /// Returns a raw tokenizer instance (not backed by FTS5 index).
-    func makeTokenizer(caseFolding: Bool = true) throws -> any FTS5Tokenizer {
-        var config = Configuration()
-        config.prepareDatabase { db in db.add(tokenizer: JiebaTokenizer.self) }
-        let db = try DatabaseQueue(configuration: config)
-        return try db.read { db in
-            try db.makeTokenizer(.jieba(caseFolding: caseFolding))
-        }
-    }
-
-    func insert(_ text: String, into db: DatabaseQueue) throws {
-        try db.write { db in
-            try db.execute(sql: "INSERT INTO docs(content) VALUES (?)",
-                           arguments: [text])
-        }
-    }
-
-    func count(query: String, in db: DatabaseQueue) throws -> Int {
-        guard !query.isEmpty else { return 0 }
-        return try db.read { db in
-            let pattern = FTS5Pattern(matchingPhrase: query)
-            return try Int.fetchOne(
-                db,
-                sql: "SELECT COUNT(*) FROM docs WHERE docs MATCH ?",
-                arguments: [pattern]
-            ) ?? 0
-        }
-    }
+    // Helpers: see JiebaFTS5TestSupport.swift (XCTestCase extensions).
 
     // =========================================================================
     // MARK: - 1. Basic Chinese Segmentation

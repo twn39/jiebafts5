@@ -3,6 +3,8 @@
 //
 // Global shared engine managing the cppjieba lifecycle.
 // Supports dynamic configuration, explicit shutdown, and thread-safe dynamic inserts.
+//
+// Contract: docs/ENGINE_LIFECYCLE.md
 
 import CJiebaWrapper
 import Foundation
@@ -11,6 +13,9 @@ import Foundation
 
 /// Wraps the cppjieba segmentation engine as a process-lifetime global singleton
 /// with configurable lifecycle and runtime dictionary mutation.
+///
+/// Thread-safety of segmentation / insert is provided by C++ `std::shared_mutex`
+/// inside `CJiebaWrapper`; hence `@unchecked Sendable`.
 public final class JiebaEngine: @unchecked Sendable {
 
     // MARK: Config State
@@ -36,10 +41,9 @@ public final class JiebaEngine: @unchecked Sendable {
         if let custom = customConfig {
             paths = custom
         } else {
-            // Default to Bundle resources
             guard
                 let dict = Bundle.module.path(forResource: "jieba.dict", ofType: "utf8"),
-                let hmm  = Bundle.module.path(forResource: "hmm_model", ofType: "utf8"),
+                let hmm = Bundle.module.path(forResource: "hmm_model", ofType: "utf8"),
                 let user = Bundle.module.path(forResource: "user.dict", ofType: "utf8")
             else {
                 fatalError(
@@ -51,43 +55,52 @@ public final class JiebaEngine: @unchecked Sendable {
             paths = (dict, hmm, user)
         }
 
-        let instance = JiebaEngine(dictPath: paths.dictPath, hmmPath: paths.hmmPath, userDictPath: paths.userDictPath)
+        let instance = JiebaEngine(
+            dictPath: paths.dictPath,
+            hmmPath: paths.hmmPath,
+            userDictPath: paths.userDictPath
+        )
         _shared = instance
         return instance
     }
 
     // MARK: Config / Lifecycle APIs
 
-    /// Configures the engine paths. Must be called BEFORE the database is initialized
-    /// or the shared engine is accessed.
+    /// Configures dictionary paths. Must be called **before** the shared engine is first accessed.
     ///
-    /// - Parameters:
-    ///   - dictPath: Absolute path to the main dict.
-    ///   - hmmPath: Absolute path to the HMM model.
-    ///   - userDictPath: Absolute path to the user dictionary.
-    public static func configure(dictPath: String, hmmPath: String, userDictPath: String) {
+    /// - Returns: `true` if paths were stored; `false` if the engine was already initialized
+    ///   (configuration ignored; see `docs/ENGINE_LIFECYCLE.md`).
+    @discardableResult
+    public static func configure(dictPath: String, hmmPath: String, userDictPath: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
         guard _shared == nil else {
             NSLog("[JiebaFTS5] Warning: JiebaEngine has already been initialized. Configuration ignored.")
-            return
+            return false
         }
         customConfig = (dictPath, hmmPath, userDictPath)
+        return true
     }
 
-    /// Shuts down the current engine and releases its ~25 MB memory.
-    /// Useful for iOS memory warnings, background suspension, or clean test teardown.
-    /// Subsequent calls to `JiebaEngine.shared` will automatically reinitialize the engine.
+    /// Whether the shared engine has been created (not yet shut down).
+    public static var isInitialized: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _shared != nil
+    }
+
+    /// Shuts down the current engine and releases its dictionary memory.
+    /// Subsequent calls to `JiebaEngine.shared` reinitialize using the last `configure` paths
+    /// (if any) or bundle defaults.
     public static func shutdown() {
         lock.lock()
         defer { lock.unlock() }
-        _shared = nil // Triggers deinit & C free
+        _shared = nil
     }
 
     // MARK: Instance State
 
-    /// Opaque C handle to the underlying segmenter.
     private let handle: JiebaHandle
 
     // MARK: Init / Deinit
@@ -123,13 +136,23 @@ public final class JiebaEngine: @unchecked Sendable {
 
     // MARK: - Segmentation Wrappers
 
-    /// Precise segmentation (MixSeg: MP + HMM) with zero-allocation callback pass-through.
-    func cut(_ pText: UnsafePointer<CChar>, count: Int, context: UnsafeMutableRawPointer, callback: JiebaTokenEmitCallback) -> Int32 {
+    /// Precise segmentation (MixSeg) — used for FTS5 **query** mode.
+    func cut(
+        _ pText: UnsafePointer<CChar>,
+        count: Int,
+        context: UnsafeMutableRawPointer,
+        callback: JiebaTokenEmitCallback
+    ) -> Int32 {
         jieba_cut(handle, pText, count, context, callback)
     }
 
-    /// Search-engine segmentation (QuerySeg) with zero-allocation callback pass-through.
-    func cutForSearch(_ pText: UnsafePointer<CChar>, count: Int, context: UnsafeMutableRawPointer, callback: JiebaTokenEmitCallback) -> Int32 {
+    /// Search-engine segmentation (QuerySeg) — used for FTS5 **document** mode.
+    func cutForSearch(
+        _ pText: UnsafePointer<CChar>,
+        count: Int,
+        context: UnsafeMutableRawPointer,
+        callback: JiebaTokenEmitCallback
+    ) -> Int32 {
         jieba_cut_for_search(handle, pText, count, context, callback)
     }
 
@@ -137,9 +160,11 @@ public final class JiebaEngine: @unchecked Sendable {
 
     /// Dynamically inserts a word into the dictionary at runtime.
     /// Thread-safe via internal C++ read-write locks.
-    public func insertUserWord(_ word: String) {
+    /// - Returns: `true` on success, `false` on failure (null handle / empty / C++ error).
+    @discardableResult
+    public func insertUserWord(_ word: String) -> Bool {
         word.withCString { ptr in
-            jieba_insert_user_word(handle, ptr)
+            jieba_insert_user_word(handle, ptr) != 0
         }
     }
 

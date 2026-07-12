@@ -15,28 +15,7 @@ import SQLite3
 
 final class JiebaPerformanceTests: XCTestCase {
 
-    private func makeDB(
-        caseFolding: Bool = true,
-        widthFolding: Bool = true,
-        diacriticFolding: Bool = true,
-        stopwords: Set<String>? = nil
-    ) throws -> DatabaseQueue {
-        var config = Configuration()
-        config.prepareDatabase { db in db.add(tokenizer: JiebaTokenizer.self) }
-        let db = try DatabaseQueue(configuration: config)
-        try db.write { db in
-            try db.create(virtualTable: "docs", using: FTS5()) { t in
-                t.tokenizer = .jieba(
-                    caseFolding: caseFolding,
-                    widthFolding: widthFolding,
-                    diacriticFolding: diacriticFolding,
-                    stopwords: stopwords
-                )
-                t.column("content")
-            }
-        }
-        return db
-    }
+    // Helpers: see JiebaFTS5TestSupport.swift (XCTestCase extensions).
 
     func testTokenizerZeroAllocationHotPath() throws {
         var config = Configuration()

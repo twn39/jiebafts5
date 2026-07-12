@@ -14,7 +14,7 @@ import SQLite3
 
 // MARK: - 9. Update & Delete (Index Maintenance)
 
-extension JiebaTokenizerTests {
+final class JiebaTokenizerIndexTests: XCTestCase {
 
     func testDeleteRemovesFromIndex() throws {
         let db = try makeDB()
@@ -51,7 +51,7 @@ extension JiebaTokenizerTests {
 
 // MARK: - 10. Multiple Documents & Ranking
 
-extension JiebaTokenizerTests {
+extension JiebaTokenizerIndexTests {
 
     func testMultipleDocumentsSelectivity() throws {
         let db = try makeDB()
@@ -66,7 +66,7 @@ extension JiebaTokenizerTests {
 
 // MARK: - 11. Concurrency (Thread Safety)
 
-extension JiebaTokenizerTests {
+extension JiebaTokenizerIndexTests {
 
     func testConcurrentSearches() throws {
         let db = try makeDB()
@@ -114,7 +114,7 @@ extension JiebaTokenizerTests {
 
 // MARK: - 12. Singleton Sharing
 
-extension JiebaTokenizerTests {
+extension JiebaTokenizerIndexTests {
 
     func testEngineIsShared() throws {
         let db1 = try makeDB()
@@ -129,7 +129,7 @@ extension JiebaTokenizerTests {
 
 // MARK: - 13. AUX Tokenization (snippet / highlight)
 
-extension JiebaTokenizerTests {
+extension JiebaTokenizerIndexTests {
 
     func testAUXTokenizationDoesNotCrash() throws {
         let db = try makeDB()
@@ -146,7 +146,7 @@ extension JiebaTokenizerTests {
 
 // MARK: - 14. JiebaTokenizerOptions
 
-extension JiebaTokenizerTests {
+extension JiebaTokenizerIndexTests {
 
     func testOptionsEquatable() {
         XCTAssertEqual(JiebaTokenizerOptions(caseFolding: true),
@@ -191,7 +191,7 @@ extension JiebaTokenizerTests {
 
 // MARK: - 15. Lifecycle Management & Custom Configuration
 
-extension JiebaTokenizerTests {
+extension JiebaTokenizerIndexTests {
     func testEngineConfigureAndShutdown() throws {
         JiebaEngine.shutdown()
 
@@ -216,7 +216,7 @@ extension JiebaTokenizerTests {
 
 // MARK: - 16. Dynamic User Dictionary
 
-extension JiebaTokenizerTests {
+extension JiebaTokenizerIndexTests {
     func testDynamicUserWordInsertion() throws {
         let tok = try makeTokenizer(caseFolding: true)
 
@@ -234,7 +234,7 @@ extension JiebaTokenizerTests {
 
 // MARK: - 17. Stopwords & Unicode Folding
 
-extension JiebaTokenizerTests {
+extension JiebaTokenizerIndexTests {
     func testStopwordsFiltering() throws {
         var config = Configuration()
         config.prepareDatabase { db in db.add(tokenizer: JiebaTokenizer.self) }

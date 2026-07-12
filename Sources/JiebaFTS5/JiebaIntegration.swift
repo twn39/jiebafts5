@@ -32,7 +32,7 @@ extension FTS5TokenizerDescriptor {
         diacriticFolding: Bool = true,
         stopwords: Set<String>? = nil
     ) -> FTS5TokenizerDescriptor {
-        JiebaTokenizer.tokenizerDescriptor(
+        jieba(
             options: JiebaTokenizerOptions(
                 caseFolding: caseFolding,
                 widthFolding: widthFolding,
@@ -40,6 +40,16 @@ extension FTS5TokenizerDescriptor {
                 stopwords: stopwords
             )
         )
+    }
+
+    /// Jieba tokenizer from a full options value (profiles, presets, custom).
+    ///
+    /// ```swift
+    /// t.tokenizer = .jieba(options: .recommended)
+    /// t.tokenizer = .jieba(options: .strictMatch)
+    /// ```
+    public static func jieba(options: JiebaTokenizerOptions) -> FTS5TokenizerDescriptor {
+        JiebaTokenizer.tokenizerDescriptor(options: options)
     }
 }
 

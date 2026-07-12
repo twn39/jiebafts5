@@ -83,3 +83,4 @@ playground.xcworkspace
 # Environment files
 .env
 .env.local
+.codegraph

@@ -43,15 +43,25 @@ try dbPool.write { db in
 }
 ```
 
-#### Customizing folding & stopwords:
+#### Profiles & custom options:
 ```swift
+// Recommended: all folding + Chinese/English stopwords
+t.tokenizer = .jieba(options: .recommended)
+
+// Strict: no folding
+t.tokenizer = .jieba(options: .strictMatch)
+
+// Custom folding & stopwords
 t.tokenizer = .jieba(
     caseFolding: true,
     widthFolding: true,
     diacriticFolding: true,
     stopwords: ["的", "了", "和", "the", "a"]
 )
+// or: stopwords: StopwordPresets.chinese
 ```
+
+See [docs/TOKENIZATION_PROFILE.md](docs/TOKENIZATION_PROFILE.md) and [docs/ENGINE_LIFECYCLE.md](docs/ENGINE_LIFECYCLE.md).
 
 ### 3. Insert and search
 
@@ -79,7 +89,8 @@ try dbPool.read { db in
 
 To insert custom vocabularies dynamically at runtime without restarting the engine:
 ```swift
-JiebaEngine.shared.insertUserWord("男默女泪")
+let ok = JiebaEngine.shared.insertUserWord("男默女泪")
+// ok == false if insertion failed
 ```
 This operation is thread-safe and safely isolated under exclusive write locks.
 
@@ -157,4 +168,4 @@ Our test suite contains 64 rigorous test cases covering concurrency stress tests
 
 MIT — see [LICENSE](LICENSE).
 
-Bundles [cppjieba](https://github.com/yanyiwu/cppjieba) and [limonp](https://github.com/yanyiwu/limonp) (both MIT).
+Bundles [cppjieba](https://github.com/yanyiwu/cppjieba) (MIT; header-only, no limonp since upstream removed that dependency).

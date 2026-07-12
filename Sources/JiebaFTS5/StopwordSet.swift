@@ -95,25 +95,9 @@ public struct StopwordSet: Sendable {
 
     // MARK: - Normalization helper
 
-    /// Normalizes a single stopword. The folding logic MUST exactly match the tokenizer emission logic.
+    /// Normalizes a single stopword. Delegates to `TokenNormalizer` (same rules as emit slow path).
     public static func normalizeWord(_ word: String, options: JiebaTokenizerOptions) -> String {
-        var token = word
-        if options.widthFolding {
-            token = token.precomposedStringWithCompatibilityMapping
-        }
-
-        var compareOptions: String.CompareOptions = []
-        if options.diacriticFolding {
-            compareOptions.insert(.diacriticInsensitive)
-        }
-        if options.caseFolding {
-            compareOptions.insert(.caseInsensitive)
-        }
-
-        if !compareOptions.isEmpty {
-            token = token.folding(options: compareOptions, locale: nil)
-        }
-        return token
+        TokenNormalizer.normalizeWord(word, options: options)
     }
 
     @inline(__always)

@@ -1,0 +1,18 @@
+{
+  "include": [
+    "Sources",
+    "Tests"
+  ],
+  "exclude": [
+    ".build",
+    "include",
+    "docs"
+  ],
+  "output": ".codegraph",
+  "languages": [
+    "swift",
+    "cpp",
+    "c"
+  ],
+  "cache": true
+}

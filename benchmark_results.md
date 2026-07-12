@@ -11,9 +11,9 @@
 
 | 分词器配置 | 耗时 (ms) | 吞吐率 (MB/s) |
 | :--- | :---: | :---: |
-| Jieba (Default) | 1979.48 | 1.42 |
-| Jieba (With Stopwords) | 2134.31 | 1.32 |
-| Jieba (No Folding) | 1967.45 | 1.43 |
+| Jieba (Default) | 2054.36 | 1.37 |
+| Jieba (With Stopwords) | 2189.73 | 1.29 |
+| Jieba (No Folding) | 2025.22 | 1.39 |
 
 
 ## 维度 B：FTS5 数据库表写入与索引吞吐率 (FTS5 Indexing Throughput)
@@ -21,8 +21,8 @@
 
 | 虚拟表分词器配置 | 耗时 (ms) | 吞吐率 (MB/s) |
 | :--- | :---: | :---: |
-| Jieba (Default) | 2113.86 | 1.33 |
-| Jieba (With Stopwords) | 2278.15 | 1.24 |
-| SQLite unicode61 | 111.31 | 25.31 |
+| Jieba (Default) | 2162.86 | 1.30 |
+| Jieba (With Stopwords) | 2292.99 | 1.23 |
+| SQLite unicode61 | 102.05 | 27.60 |
 
 *(测试结果在运行时自动计算生成)*

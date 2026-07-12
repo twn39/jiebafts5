@@ -1,5 +1,5 @@
 // CJiebaWrapper.h
-// Pure C interface over cppjieba::Jieba, optimized for zero-heap-allocation.
+// Pure C interface over cppjieba, optimized for zero-heap-allocation emit.
 
 #pragma once
 
@@ -19,8 +19,8 @@ typedef void* JiebaHandle;
 /// All path arguments must be valid UTF-8 absolute paths.
 /// Returns NULL on allocation failure or if any file cannot be opened.
 JiebaHandle jieba_create(const char* dict_path,
-                          const char* hmm_path,
-                          const char* user_dict_path);
+                         const char* hmm_path,
+                         const char* user_dict_path);
 
 /// Destroys the engine and frees all associated memory.
 void jieba_free(JiebaHandle handle);
@@ -37,8 +37,8 @@ typedef int (*JiebaTokenEmitCallback)(void* ctx, uint32_t offset, uint32_t lengt
 // MARK: - Segmentation
 
 /// Precise segmentation (MixSeg: Maximum-Probability + HMM) with callback.
-/// Intended for FTS5 query tokenization.
-/// Returns SQLITE_OK (0) on success, or the callback error code.
+/// Intended for FTS5 **query** tokenization.
+/// Returns 0 (SQLITE_OK) on success, non-zero on callback abort or internal error.
 int jieba_cut(JiebaHandle handle,
               const char* text,
               size_t      len,
@@ -46,8 +46,8 @@ int jieba_cut(JiebaHandle handle,
               JiebaTokenEmitCallback callback);
 
 /// Search-engine segmentation (QuerySeg) with callback.
-/// Intended for FTS5 document tokenization.
-/// Returns SQLITE_OK (0) on success, or the callback error code.
+/// Intended for FTS5 **document** tokenization.
+/// Returns 0 (SQLITE_OK) on success, non-zero on callback abort or internal error.
 int jieba_cut_for_search(JiebaHandle handle,
                          const char* text,
                          size_t      len,
@@ -58,7 +58,8 @@ int jieba_cut_for_search(JiebaHandle handle,
 
 /// Dynamically inserts a word into the dictionary at runtime.
 /// Thread-safe via internal unique lock.
-void jieba_insert_user_word(JiebaHandle handle, const char* word);
+/// Returns 1 on success, 0 on failure.
+int jieba_insert_user_word(JiebaHandle handle, const char* word);
 
 #ifdef __cplusplus
 }
